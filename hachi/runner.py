@@ -2,6 +2,7 @@ import base64
 import fcntl
 import hashlib
 import json
+from io import BytesIO
 import os
 from pathlib import Path
 import time
@@ -10,7 +11,8 @@ import requests
 from PIL import Image
 from .core import Canvas, canonical
 from .design import demo_actions, digest, validate_protocol
-from .render import render
+from .render import render, write_artifact_once
+from .integrity import runtime_versions, verify_response_chain, file_sha256
 
 
 def save(path, value):
@@ -25,6 +27,14 @@ def save(path, value):
 
 def load(path):
     return json.loads(Path(path).read_text())
+
+
+def save_once(path, value):
+    if Path(path).exists():
+        if load(path) != value:
+            raise ValueError(f'Immutable audit record differs: {Path(path).name}')
+        return
+    save(path, value)
 
 
 def picture(path):
@@ -60,6 +70,47 @@ class API:
                 'endpoint': self.endpoint, 'execution_kind': 'local_model' if self.local else 'remote_api'}
 
 
+def execution_source(transport):
+    # Only the concrete production adapter is a real-model source. Test
+    # callables/subclasses stay technical regardless of the response they return.
+    if type(transport) is API:
+        return {'data_kind': 'real_model', 'adapter': 'hachi.runner.API',
+                'execution_kind': 'local_model' if transport.local else 'remote_api',
+                'endpoint': transport.endpoint}
+    return {'data_kind': 'technical_test', 'adapter': 'test_callable',
+            'execution_kind': 'technical_test'}
+
+
+def verify_run_provenance(directory, required_kind):
+    """Fail closed for legacy, mixed, missing, or reclassified audit sources."""
+    directory = Path(directory)
+    manifest, summary = load(directory/'manifest.json'), load(directory/'summary.json')
+    source = manifest.get('execution_source')
+    runtime = manifest.get('runtime')
+    if manifest.get('schema_version') != 2 or not runtime:
+        raise ValueError('Legacy provenance lacks frozen code/renderer identity')
+    if not source or source.get('data_kind') != required_kind or summary.get('data_kind') != required_kind:
+        raise ValueError('Run provenance does not establish the required data source')
+    if required_kind == 'real_model' and (source.get('adapter') != 'hachi.runner.API' or
+            source.get('execution_kind') not in ('local_model', 'remote_api') or not source.get('endpoint')):
+        raise ValueError('Real-model adapter provenance missing')
+    commands = summary.get('commands')
+    if type(commands) is not int or not 1 <= commands <= 40:
+        raise ValueError('Invalid command count in provenance record')
+    expected_files = {f'{n:02d}.response.json' for n in range(commands)}
+    if {p.name for p in directory.glob('*.response.json')} != expected_files:
+        raise ValueError('Response coverage does not match completed commands')
+    for n in range(commands):
+        verify_response_chain(directory, n, source, runtime)
+    artifacts = summary.get('artifacts_sha256')
+    if not artifacts or not {'final.png','final.svg','target.png'} <= set(artifacts):
+        raise ValueError('Rendered artifact provenance missing')
+    for name, expected_hash in artifacts.items():
+        if Path(name).name != name or not (directory/name).is_file() or file_sha256(directory/name) != expected_hash:
+            raise ValueError('Rendered artifact hash mismatch')
+    return source
+
+
 def replay_demo(demo, condition, seed, directory, protocol):
     actions, order = demo_actions(demo, condition, seed)
     context, paths = [], []
@@ -72,30 +123,39 @@ def replay_demo(demo, condition, seed, directory, protocol):
     return context, order
 
 
-def execute(run, target, demo, protocol, directory, transport):
+def execute(run, target, demo, protocol, directory, transport, frozen_material=None):
     """Durable response-before-replay. Uncertain outbound calls block automatic retry."""
     validate_protocol(protocol)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / '.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return _execute(run, target, demo, protocol, directory, transport)
+        return _execute(run, target, demo, protocol, directory, transport, frozen_material)
 
 
-def _execute(run, target, demo, p, directory, transport):
+def _execute(run, target, demo, p, directory, transport, frozen_material):
     image_path = Path(target['image'])
-    identity = {'run': run, 'protocol': p, 'target': target, 'demo': demo,
-                'target_sha256': hashlib.sha256(image_path.read_bytes()).hexdigest()}
+    image_bytes = image_path.read_bytes()
+    image_hash = hashlib.sha256(image_bytes).hexdigest()
+    if frozen_material is not None and (frozen_material['target'] != target or frozen_material['demo'] != demo or
+                                       frozen_material['image_sha256'] != image_hash):
+        raise ValueError('Run inputs differ from frozen campaign materials')
+    source = execution_source(transport)
+    runtime = runtime_versions()
+    identity = {'schema_version': 2, 'runtime': runtime, 'run': run, 'protocol': p, 'target': target, 'demo': demo, 'execution_source': source,
+                'target_sha256': image_hash, 'frozen_material_sha256': digest(frozen_material)}
     manifest = directory / 'manifest.json'
     if manifest.exists() and load(manifest) != identity:
-        raise ValueError('Resume inputs differ from frozen manifest')
-    save(manifest, identity)
-    with Image.open(image_path) as img:
+        raise ValueError('Resume inputs, execution provenance, or runtime versions differ from frozen manifest; legacy logs require review')
+    save_once(manifest, identity)
+    with Image.open(BytesIO(image_bytes)) as img:
         if img.size != (p['image_size'], p['image_size']):
             raise ValueError('Target resolution must match frozen protocol')
-        img.convert('RGB').save(directory / 'target.png')
+        buffer = BytesIO()
+        img.convert('RGB').save(buffer, format='PNG')
+        write_artifact_once(directory / 'target.png', buffer.getvalue())
     demo_context, order = replay_demo(demo, run['condition'], run['permutation_seed'], directory, p)
-    save(directory / 'permutation.json', order)
+    save_once(directory / 'permutation.json', order)
     canvas, history = Canvas(), []
     while not canvas.stopped and canvas.commands < 40:
         n = canvas.commands
@@ -110,18 +170,23 @@ def _execute(run, target, demo, p, directory, transport):
         if p.get('seed_supported'):
             packet['seed'] = run['execution_seed']
         if res.exists():
-            response = load(res)
+            response = verify_response_chain(directory, n, source, runtime, packet)
         else:
             if pending.exists():
                 raise RuntimeError('Uncertain API outcome: inspect pending call; no automatic paid retry')
-            save(req, packet)
-            save(pending, {'started_at': time.time(), 'request_sha256': digest(packet)})
+            save_once(req, packet)
+            save_once(pending, {'started_at': time.time(), 'request_sha256': digest(packet)})
             try:
-                response = transport(packet)
+                response = {**transport(packet), 'provenance': source,
+                            'request_sha256': digest(packet), 'runtime_sha256': digest(runtime)}
             except Exception as e:
                 save(directory / f'{n:02d}.failure.json', {'type': type(e).__name__, 'outcome': 'uncertain'})
                 raise
-            save(res, response)
+            save_once(res, response)
+            save_once(directory / f'{n:02d}.receipt.json', {'request_sha256': digest(packet),
+                                                         'response_sha256': digest(response)})
+        if response.get('provenance') != source:
+            raise ValueError('Saved response provenance missing or inconsistent; no reclassification allowed')
         if response['http_status'] != 200:
             raise RuntimeError('Provider failure saved; resolve explicitly before continuation')
         body = json.loads(response['body'])
@@ -133,13 +198,19 @@ def _execute(run, target, demo, p, directory, transport):
         except (KeyError, IndexError, TypeError, json.JSONDecodeError):
             action = None
         outcome = canvas.apply(action)
-        event = {'command': n + 1, 'action': action, 'outcome': outcome, 'model': body['model'],
+        # Invalid parsed values may include NaN/Infinity (including numeric
+        # overflow such as 1e309), extra fields, or arbitrary model text.
+        # The exact provider body is already durably preserved in response.json.
+        # Only accepted actions enter the JSON-safe event/history representation.
+        event = {'command': n + 1, 'action': action if outcome['valid'] else None,
+                 'response_file': res.name, 'outcome': outcome, 'model': body['model'],
                  'usage': body.get('usage'), 'response_id': body.get('id')}
-        save(directory / f'{n:02d}.event.json', event)
+        save_once(directory / f'{n:02d}.event.json', event)
         history.append(event)
     render(canvas.paths, directory / 'final', p['image_size'], p['pen_width'])
     summary = {'run_id': run['run_id'], 'target_id': run['target_id'], 'condition': run['condition'],
                'commands': canvas.commands, 'invalid': canvas.invalid, 'stop_reason': 'stop' if canvas.stopped else 'budget',
-               'completion': None, 'data_kind': 'real_model' if isinstance(transport, API) else 'technical_test'}
-    save(directory / 'summary.json', summary)
+               'completion': None, 'data_kind': response['provenance']['data_kind'],
+               'artifacts_sha256': {f.name:file_sha256(f) for f in sorted(directory.iterdir()) if f.suffix in ('.svg','.png')}}
+    save_once(directory / 'summary.json', summary)
     return summary

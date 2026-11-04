@@ -12,6 +12,8 @@ def estimate(root, input_per_million, output_per_million, calls=2160):
         summary = f.parent/'summary.json'
         if not summary.exists() or json.loads(summary.read_text())['data_kind'] != 'real_model':
             continue
+        from .runner import verify_run_provenance
+        verify_run_provenance(f.parent, 'real_model')
         response = json.loads(f.read_text())
         if response['http_status'] != 200:
             continue

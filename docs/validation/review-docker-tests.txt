@@ -1,0 +1,9 @@
+...........................................                              [100%]
+43 passed in 3.50s
+usage: cli.py [-h] {freeze-materials,plan,run,analyze,blind} ...
+
+positional arguments:
+  {freeze-materials,plan,run,analyze,blind}
+
+options:
+  -h, --help            show this help message and exit

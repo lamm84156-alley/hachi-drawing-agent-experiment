@@ -4,6 +4,25 @@ import random
 import shutil
 from pathlib import Path
 from .analysis import write_csv
+from .core import validate
+from .runner import verify_run_provenance
+
+
+def blind_event(event):
+    """Export only validated geometry/operations; raw responses remain private."""
+    command = event['command']
+    valid = event['outcome']['valid']
+    if type(command) is not int or not 1 <= command <= 40 or type(valid) is not bool:
+        raise ValueError('Malformed command metadata in audit log')
+    action = None
+    if valid:
+        # Fail closed on an inconsistent legacy/tampered record rather than
+        # exporting arbitrary fields under an asserted valid flag.
+        validate(event['action'])
+        action = {'op': event['action']['op']}
+        if action['op'] == 'draw':
+            action['points'] = [list(p) for p in event['action']['points']]
+    return {'command': command, 'action': action, 'valid': valid}
 
 
 def prepare(root, output, seed):
@@ -16,6 +35,7 @@ def prepare(root, output, seed):
     for file in summaries:
         if json.loads(file.read_text())['data_kind'] != 'real_model':
             raise ValueError('Research blind packet refuses technical fixtures')
+        verify_run_provenance(file.parent, 'real_model')
     random.Random(seed).shuffle(summaries)
     output.mkdir(parents=True)
     private = output / 'coordinator_only'; private.mkdir(mode=0o700)
@@ -31,8 +51,8 @@ def prepare(root, output, seed):
             shutil.copyfile(source / name, packet / name)
         # Do not expose prompt, demonstration, condition, model text, usage, or run ID.
         events = [json.loads(f.read_text()) for f in sorted(source.glob('*.event.json'))]
-        actions = [{'command': e['command'], 'action': e['action'], 'valid': e['outcome']['valid']} for e in events]
-        (packet / 'actions.json').write_text(json.dumps(actions, indent=2))
+        actions = [blind_event(e) for e in events]
+        (packet / 'actions.json').write_text(json.dumps(actions, indent=2, allow_nan=False))
         for frame in source.glob('[0-9][0-9].png'):
             shutil.copyfile(frame, packet / frame.name)
         mapping.append({'blind_id': anonymous, 'run_id': summary['run_id']})

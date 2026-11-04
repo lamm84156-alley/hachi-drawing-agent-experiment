@@ -79,3 +79,101 @@ def test_full_context_and_wrong_model_halt(tmp_path,setup):
     with pytest.raises(RuntimeError,match='model identifier'): execute(r,t,d,p,tmp_path/'mismatch',fake)
     assert (tmp_path/'mismatch'/'00.response.json').exists()
     assert not (tmp_path/'mismatch'/'summary.json').exists()
+
+@pytest.mark.parametrize('token', ['NaN', 'Infinity', '-Infinity', '1e309'])
+def test_nonfinite_action_consumes_budget_and_resumes(tmp_path, setup, token):
+    p,t,d,r = setup
+    r = {**r, 'condition': 'No Demo'}
+    raw = '{"op":"draw","points":[[' + token + ',0.1],[0.2,0.2],[0.3,0.2],[0.4,0.1]]}'
+    outputs = iter([raw, '{"op":"stop"}'])
+    directory = tmp_path / 'nonfinite'
+    def fake(packet):
+        return {'http_status':200, 'body':json.dumps({'model':'test-only', 'choices':[{'message':{'content':next(outputs)}}]})}
+    summary = execute(r,t,d,p,directory,fake)
+    assert summary['commands'] == 2 and summary['invalid'] == 1
+    assert summary['data_kind'] == 'technical_test'
+    body = json.loads(load(directory/'00.response.json')['body'])
+    assert body['choices'][0]['message']['content'] == raw
+    assert load(directory/'00.event.json')['action'] is None
+    assert np.array_equal(np.array(Image.open(directory/'00.png')), np.array(Image.open(directory/'01.png')))
+    def forbidden(packet):
+        raise AssertionError('Resume must not repeat a model call')
+    assert execute(r,t,d,p,directory,forbidden) == summary
+
+def test_technical_resume_cannot_be_reclassified_as_real(tmp_path,setup,monkeypatch):
+    from hachi.runner import API
+    p,t,d,r=setup
+    directory=tmp_path/'runs'/'test'
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    summary=execute(r,t,d,p,directory,fake)
+    snapshot={f.name:f.read_bytes() for f in directory.iterdir() if f.name!='.lock'}
+    def forbidden(self,packet): raise AssertionError('No actual model call is authorized by this test')
+    monkeypatch.setattr(API,'__call__',forbidden)
+    api=API('http://127.0.0.1:1/v1/chat/completions')
+    with pytest.raises(ValueError,match='provenance'): execute(r,t,d,p,directory,api)
+    assert summary['data_kind']=='technical_test'
+    assert snapshot=={f.name:f.read_bytes() for f in directory.iterdir() if f.name!='.lock'}
+    with pytest.raises(ValueError): prepare(directory.parent,tmp_path/'blind',42)
+
+
+def test_missing_response_source_blocks_resume_and_blind_export(tmp_path,setup):
+    from hachi.runner import save
+    p,t,d,r=setup
+    directory=tmp_path/'runs'/'test'
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    execute(r,t,d,p,directory,fake)
+    response=load(directory/'00.response.json')
+    response.pop('provenance')
+    save(directory/'00.response.json',response)
+    with pytest.raises(ValueError,match='provenance'): execute(r,t,d,p,directory,fake)
+    # A manually relabelled summary cannot bypass the independent source checks.
+    summary=load(directory/'summary.json'); summary['data_kind']='real_model'
+    save(directory/'summary.json',summary)
+    with pytest.raises(ValueError,match='provenance'): prepare(directory.parent,tmp_path/'blind',42)
+
+@pytest.mark.parametrize('record', ['request','response','pending','receipt','event'])
+def test_changed_audit_record_stops_without_overwrite(tmp_path,setup,record):
+    from hachi.runner import save
+    p,t,d,r=setup
+    directory=tmp_path/'run'
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    execute(r,t,d,p,directory,fake)
+    path=directory/f'00.{record}.json'
+    value=load(path)
+    if record=='request': value['model']='tampered-model'
+    elif record=='response': value['body']='tampered-response'
+    elif record=='pending': value['request_sha256']='tampered-request-hash'
+    elif record=='receipt': value['response_sha256']='tampered-response-hash'
+    else: value['action']={'op':'undo'}
+    save(path,value)
+    snapshot={f.name:f.read_bytes() for f in directory.iterdir() if f.name!='.lock'}
+    def forbidden(packet): raise AssertionError('Tampering must not trigger a new call')
+    with pytest.raises(ValueError): execute(r,t,d,p,directory,forbidden)
+    assert snapshot=={f.name:f.read_bytes() for f in directory.iterdir() if f.name!='.lock'}
+
+@pytest.mark.parametrize('version_key',['code_sha256','renderer_binary_sha256'])
+def test_version_drift_blocks_resume(tmp_path,setup,monkeypatch,version_key):
+    import hachi.runner as runner
+    p,t,d,r=setup
+    directory=tmp_path/'run'
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    execute(r,t,d,p,directory,fake)
+    versions=runner.runtime_versions()
+    monkeypatch.setattr(runner,'runtime_versions',lambda:{**versions,version_key:'changed'})
+    with pytest.raises(ValueError,match='runtime versions'): execute(r,t,d,p,directory,fake)
+
+def test_saved_request_byte_change_is_not_normalized_away(tmp_path,setup):
+    p,t,d,r=setup
+    directory=tmp_path/'run'
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    execute(r,t,d,p,directory,fake)
+    request=directory/'00.request.json'
+    request.write_bytes(request.read_bytes()+b'\n')
+    changed=request.read_bytes()
+    with pytest.raises(ValueError,match='bytes differ'): execute(r,t,d,p,directory,fake)
+    assert request.read_bytes()==changed

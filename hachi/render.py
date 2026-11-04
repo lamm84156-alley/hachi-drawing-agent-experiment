@@ -1,8 +1,18 @@
 """DiffVG is mandatory for experimental feedback; no renderer fallback."""
 from pathlib import Path
+from io import BytesIO
 import numpy as np
 from PIL import Image
 from .core import svg, validate
+
+
+def write_artifact_once(path, content):
+    path = Path(path)
+    if path.exists():
+        if path.read_bytes() != content:
+            raise ValueError(f'Immutable rendered artifact differs: {path.name}')
+        return
+    path.write_bytes(content)
 
 
 def render(paths, prefix, size, pen_width):
@@ -27,6 +37,8 @@ def render(paths, prefix, size, pen_width):
         pixels = np.full((size, size, 3), 255, dtype=np.uint8)
     prefix = Path(prefix)
     prefix.parent.mkdir(parents=True, exist_ok=True)
-    prefix.with_suffix('.svg').write_text(svg(paths, size, pen_width))
-    Image.fromarray(pixels).save(prefix.with_suffix('.png'))
+    write_artifact_once(prefix.with_suffix('.svg'), svg(paths, size, pen_width).encode())
+    buffer = BytesIO()
+    Image.fromarray(pixels).save(buffer, format='PNG')
+    write_artifact_once(prefix.with_suffix('.png'), buffer.getvalue())
     return prefix.with_suffix('.png')

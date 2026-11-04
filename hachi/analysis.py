@@ -66,6 +66,9 @@ def analyze(root, ratings_path, output, seed):
     summaries = [json.loads(p.read_text()) for p in Path(root).glob('*/summary.json')]
     if not summaries or any(r['data_kind'] != 'real_model' for r in summaries):
         raise ValueError('Analysis requires real-model logs; technical fixtures are prohibited')
+    from .runner import verify_run_provenance
+    for directory in Path(root).glob('*/summary.json'):
+        verify_run_provenance(directory.parent, 'real_model')
     campaign_path = Path(root)/'campaign.json'
     if not campaign_path.exists():
         raise ValueError('Frozen campaign manifest required to detect missing/unstarted runs')

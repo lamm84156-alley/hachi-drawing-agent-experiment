@@ -1,0 +1,26 @@
+Nonfinite action and blind export regression baseline (old commit b4b99e3)
+E       ValueError: Out of range float values are not JSON compliant: nan
+E       ValueError: Out of range float values are not JSON compliant: inf
+E       ValueError: Out of range float values are not JSON compliant: -inf
+E       ValueError: Out of range float values are not JSON compliant: inf
+E           assert b'SECRET_CONDITION_Reordered_TEST_FIXTURE' not in b'[\n  {\n    "command": 1,\n    "action": "SECRET_CONDITION_Reordered_TEST_FIXTURE",\n    "valid": false\n  },\n  {\n...   "valid": true\n  },\n  {\n    "command": 6,\n    "action": {\n      "op": "stop"\n    },\n    "valid": true\n  }\n]'
+E            +  where b'SECRET_CONDITION_Reordered_TEST_FIXTURE' = <built-in method encode of str object at 0x7f75df9aab50>()
+E            +    where <built-in method encode of str object at 0x7f75df9aab50> = 'SECRET_CONDITION_Reordered_TEST_FIXTURE'.encode
+E            +  and   b'[\n  {\n    "command": 1,\n    "action": "SECRET_CONDITION_Reordered_TEST_FIXTURE",\n    "valid": false\n  },\n  {\n...   "valid": true\n  },\n  {\n    "command": 6,\n    "action": {\n      "op": "stop"\n    },\n    "valid": true\n  }\n]' = read_bytes()
+E            +    where read_bytes = PosixPath('/tmp/pytest-of-agent/pytest-7/test_invalid_free_text_never_e0/TEST_FIXTURE_blind/raters/item-0001/actions.json').read_bytes
+FAILED tests/test_integration.py::test_nonfinite_action_consumes_budget_and_resumes[NaN]
+FAILED tests/test_integration.py::test_nonfinite_action_consumes_budget_and_resumes[Infinity]
+FAILED tests/test_integration.py::test_nonfinite_action_consumes_budget_and_resumes[-Infinity]
+FAILED tests/test_integration.py::test_nonfinite_action_consumes_budget_and_resumes[1e309]
+FAILED tests/test_blind.py::test_invalid_free_text_never_enters_blind_packet
+5 failed in 3.32s
+
+Technical-to-real resume regression baseline (old commit b4b99e3)
+E       Failed: DID NOT RAISE ValueError
+FAILED tests/test_integration.py::test_technical_resume_cannot_be_reclassified_as_real
+1 failed in 2.14s
+
+Saved request mutation regression baseline (old commit b4b99e3)
+E       Failed: DID NOT RAISE ValueError
+FAILED tests/test_integration.py::test_changed_audit_record_stops_without_overwrite[request]
+1 failed in 2.16s
