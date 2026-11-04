@@ -1,0 +1,1 @@
+2026-11-04: all 12 Bash code blocks passed bash -n; embedded Python parsed with ast.parse; SHA-256 manifest format validated. No installation, download, server or inference commands from the guide were executed. Documentation command checks do not establish live model compatibility.

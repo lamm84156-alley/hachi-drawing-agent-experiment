@@ -1,0 +1,10 @@
+CPU-only engine source build; no model files downloaded or inference performed.
+Commit: 8642541b255bfb5dc39cd351a178be09013a55d6
+CMake: Release; GGML_NATIVE=ON; GGML_CUDA/VULKAN/METAL/BLAS=OFF; LLAMA_BUILD_TESTS=OFF
+Target: llama-server; build parallelism: 4
+[ 97%] Building CXX object tools/server/CMakeFiles/llama-server-impl.dir/server-models-sched.cpp.o
+[ 98%] Linking CXX shared library ../../bin/libllama-server-impl.so
+[ 98%] Built target llama-server-impl
+[100%] Building CXX object tools/server/CMakeFiles/llama-server.dir/main.cpp.o
+[100%] Linking CXX executable ../../bin/llama-server
+[100%] Built target llama-server
