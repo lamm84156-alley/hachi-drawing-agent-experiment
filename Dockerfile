@@ -10,6 +10,6 @@ RUN --mount=type=secret,id=proxy_ca \
     apt-get update && apt-get install -y --no-install-recommends build-essential git ca-certificates && \
     pip install --no-cache-dir -r requirements.lock --extra-index-url https://download.pytorch.org/whl/cpu && \
     sh scripts/install_diffvg.sh && \
-    pip install --no-deps --no-build-isolation -e . && \
+    pip install --no-deps --no-build-isolation -e . && chmod -R a+rX /app && \
     rm -rf /tmp/hachi-diffvg /root/.cache/pip /var/lib/apt/lists/*
 CMD ["python", "-m", "pytest", "-q"]

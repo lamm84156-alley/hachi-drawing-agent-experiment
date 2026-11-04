@@ -1,18 +1,7 @@
-Traceback (most recent call last):
-  File "/usr/local/bin/hachi", line 5, in <module>
-    from hachi.cli import main
-  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1322, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 1262, in _find_spec
-  File "/usr/local/lib/python3.12/site-packages/__editable___hachi_drawing_experiment_0_1_0_finder.py", line 20, in find_spec
-    return cls._find_spec(fullname, Path(pkg_path))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/site-packages/__editable___hachi_drawing_experiment_0_1_0_finder.py", line 38, in _find_spec
-    if candidate.exists():
-       ^^^^^^^^^^^^^^^^^^
-  File "/usr/local/lib/python3.12/pathlib.py", line 860, in exists
-    self.stat(follow_symlinks=follow_symlinks)
-  File "/usr/local/lib/python3.12/pathlib.py", line 840, in stat
-    return os.stat(self, follow_symlinks=follow_symlinks)
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-PermissionError: [Errno 13] Permission denied: '/app/hachi/__init__.py'
+usage: hachi [-h] {plan,run,analyze,blind} ...
+
+positional arguments:
+  {plan,run,analyze,blind}
+
+options:
+  -h, --help            show this help message and exit
