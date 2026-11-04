@@ -1,0 +1,18 @@
+Regression baseline: c7faa0c; all inputs synthetic, no model calls.
+E   OverflowError: int too large to convert to float
+E           ValueError: Exceeds the limit (4300 digits) for integer string conversion: value has 5000 digits; use sys.set_int_max_str_digits() to increase the limit
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+FAILED tests/test_integration.py::test_extreme_integer_action_is_invalid_not_fatal[huge-integer]
+FAILED tests/test_integration.py::test_extreme_integer_action_is_invalid_not_fatal[integer-parser-limit]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[event_action]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[condition]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[invalid]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[completion]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[target_id]
+FAILED tests/test_integration.py::test_audit_replays_events_and_summary[stop_reason]
+8 failed in 2.74s

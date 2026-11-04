@@ -177,3 +177,36 @@ def test_saved_request_byte_change_is_not_normalized_away(tmp_path,setup):
     changed=request.read_bytes()
     with pytest.raises(ValueError,match='bytes differ'): execute(r,t,d,p,directory,fake)
     assert request.read_bytes()==changed
+
+@pytest.mark.parametrize('token',['1'+'0'*400,'9'*5000],ids=['huge-integer','integer-parser-limit'])
+def test_extreme_integer_action_is_invalid_not_fatal(tmp_path,setup,token):
+    p,t,d,r=setup
+    raw='{"op":"draw","points":[['+token+',0],[0,0],[0,0],[0,0]]}'
+    outputs=iter([raw,'{"op":"stop"}'])
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':next(outputs)}}]})}
+    directory=tmp_path/'extreme'
+    summary=execute(r,t,d,p,directory,fake)
+    assert summary['commands']==2 and summary['invalid']==1
+    assert json.loads(load(directory/'00.response.json')['body'])['choices'][0]['message']['content']==raw
+    assert load(directory/'00.event.json')['action'] is None
+    def forbidden(packet): raise AssertionError('No model calls during resume')
+    assert execute(r,t,d,p,directory,forbidden)==summary
+
+@pytest.mark.parametrize('change',['event_action','condition','invalid','completion','target_id','stop_reason'])
+def test_audit_replays_events_and_summary(tmp_path,setup,change):
+    from hachi.runner import save, verify_run_provenance
+    p,t,d,r=setup
+    def fake(packet):
+        return {'http_status':200,'body':json.dumps({'model':'test-only','choices':[{'message':{'content':'{"op":"stop"}'}}]})}
+    directory=tmp_path/'audit'
+    execute(r,t,d,p,directory,fake)
+    verify_run_provenance(directory,'technical_test')
+    path=directory/('00.event.json' if change=='event_action' else 'summary.json')
+    value=load(path)
+    if change=='event_action': value['action']={'op':'undo'}
+    else: value[change]={'condition':'Reordered','invalid':1,'completion':1,'target_id':'OTHER','stop_reason':'budget'}[change]
+    save(path,value)
+    original=path.read_bytes()
+    with pytest.raises(ValueError): verify_run_provenance(directory,'technical_test')
+    assert path.read_bytes()==original

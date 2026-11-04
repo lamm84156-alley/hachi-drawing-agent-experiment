@@ -23,7 +23,9 @@ def validate(action):
     for p in points:
         if not isinstance(p, list) or len(p) != 2:
             raise ValueError('Each point must be [x,y]')
-        if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1 for v in p):
+        # Range-check integers before math.isfinite, which converts to float and
+        # can overflow for otherwise valid Python arbitrary-precision integers.
+        if any(type(v) not in (int, float) or not 0 <= v <= 1 or not math.isfinite(v) for v in p):
             raise ValueError('Coordinates must be finite numbers in [0,1]')
 
 

@@ -51,3 +51,13 @@ The original implementation's nonfinite-action failure, blind free-text leakage,
 Legacy logs lacking schema-2 provenance/receipts cannot be automatically resumed, relabelled or exported as real evidence; preserve them for explicit manual review. Local hashes detect inconsistent/changed records; they are not external provider attestation or a signature against an actor able to rewrite every local record.
 
 Latest native validation: 43 tests passed. The Docker check mounts the updated source read-only into the previously verified dependency image, runs the same tests and checks the updated CLI help; it is not a claim that a new standalone image was rebuilt. Exact outputs are recorded in validation/review-native-tests.txt and validation/review-docker-tests.txt. No live VLM calls or formal experiments were performed during these corrections.
+
+## Follow-up audit corrections
+
+Eight regression cases failed against c7faa0c: integer-coordinate overflow (10^400), the JSON parser's integer-string limit (5,000 digits), and undetected edits to event actions or summary condition/invalid/completion/target/stop-reason fields. Evidence is in validation/review2-before.txt.
+
+Coordinate validation now checks the normalized range before float finiteness, avoiding conversion overflow. Model-action decoding catches integer-limit ValueError as an invalid command without relaxing Python's parser limit. Raw response bodies remain unchanged; both cases consume exactly one command, preserve the canvas, and resume without extra calls.
+
+Execution and audit now share response_to_event. Audit replays all original responses in order, requires a matching event for every response, rejects actions after stop/budget and incomplete sequences, and derives commands, invalid count, stop reason, classification and run/target/condition from replay and the frozen manifest. It compares the complete canonical saved summary, retaining completion=None until separate human evaluation. Blind preparation and analysis reject inconsistent events/summaries before creating exports and do not modify the source records.
+
+Latest validation: native 57 passed (4.34 s); Docker 57 passed (4.41 s), using the updated source mounted read-only in the previously verified dependency image, without rebuilding a standalone image. Tests include direct audit rejection plus blind/analysis rejection, and verify that original raw responses and altered evidence remain preserved. See validation/review2-native-tests.txt and validation/review2-docker-tests.txt. All fixtures are synthetic; real-model calls and experiment API spend remain zero.

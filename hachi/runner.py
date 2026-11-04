@@ -81,6 +81,36 @@ def execution_source(transport):
             'execution_kind': 'technical_test'}
 
 
+def response_to_event(response, canvas, model):
+    """Single interpretation of original model output for execution and audit."""
+    if response['http_status'] != 200:
+        raise RuntimeError('Provider failure saved; resolve explicitly before continuation')
+    body = json.loads(response['body'])
+    if not isinstance(body, dict) or body.get('model') != model:
+        raise RuntimeError('Provider model identifier differs from frozen model; inspect before continuing')
+    try:
+        raw = body['choices'][0]['message']['content']
+        action = json.loads(raw)
+    except (KeyError, IndexError, TypeError, ValueError, RecursionError):
+        # ValueError also includes Python's integer-string digit limit, not just
+        # JSON syntax errors. The original content remains in response['body'].
+        action = None
+    outcome = canvas.apply(action)
+    n = canvas.commands - 1
+    return {'command': n + 1, 'action': action if outcome['valid'] else None,
+            'response_file': f'{n:02d}.response.json', 'outcome': outcome, 'model': body['model'],
+            'usage': body.get('usage'), 'response_id': body.get('id')}
+
+
+def summary_from_state(run, canvas, source, directory):
+    return {'run_id': run['run_id'], 'target_id': run['target_id'], 'condition': run['condition'],
+            'commands': canvas.commands, 'invalid': canvas.invalid,
+            'stop_reason': 'stop' if canvas.stopped else 'budget', 'completion': None,
+            'data_kind': source['data_kind'],
+            'artifacts_sha256': {f.name:file_sha256(f) for f in sorted(Path(directory).iterdir())
+                                if f.suffix in ('.svg','.png')}}
+
+
 def verify_run_provenance(directory, required_kind):
     """Fail closed for legacy, mixed, missing, or reclassified audit sources."""
     directory = Path(directory)
@@ -94,14 +124,30 @@ def verify_run_provenance(directory, required_kind):
     if required_kind == 'real_model' and (source.get('adapter') != 'hachi.runner.API' or
             source.get('execution_kind') not in ('local_model', 'remote_api') or not source.get('endpoint')):
         raise ValueError('Real-model adapter provenance missing')
-    commands = summary.get('commands')
-    if type(commands) is not int or not 1 <= commands <= 40:
+    response_files = {p.name for p in directory.glob('*.response.json')}
+    commands = len(response_files)
+    if not 1 <= commands <= 40:
         raise ValueError('Invalid command count in provenance record')
     expected_files = {f'{n:02d}.response.json' for n in range(commands)}
-    if {p.name for p in directory.glob('*.response.json')} != expected_files:
+    if response_files != expected_files:
         raise ValueError('Response coverage does not match completed commands')
+    if {p.name for p in directory.glob('*.event.json')} != {f'{n:02d}.event.json' for n in range(commands)}:
+        raise ValueError('Event coverage does not match response records')
+    canvas = Canvas()
     for n in range(commands):
-        verify_response_chain(directory, n, source, runtime)
+        response = verify_response_chain(directory, n, source, runtime)
+        try:
+            expected_event = response_to_event(response, canvas, manifest['protocol']['model'])
+        except (RuntimeError, ValueError, KeyError, TypeError) as error:
+            raise ValueError(f'Cannot replay audited response {n+1}') from error
+        event_path = directory/f'{n:02d}.event.json'
+        if file_sha256(event_path) != digest(expected_event):
+            raise ValueError('Saved event differs from original-response replay')
+    if not canvas.stopped and canvas.commands < 40:
+        raise ValueError('Summary claims completion of an unfinished response sequence')
+    expected_summary = summary_from_state(manifest['run'], canvas, source, directory)
+    if file_sha256(directory/'summary.json') != digest(expected_summary):
+        raise ValueError('Saved summary differs from frozen run and original-response replay')
     artifacts = summary.get('artifacts_sha256')
     if not artifacts or not {'final.png','final.svg','target.png'} <= set(artifacts):
         raise ValueError('Rendered artifact provenance missing')
@@ -187,30 +233,10 @@ def _execute(run, target, demo, p, directory, transport, frozen_material):
                                                          'response_sha256': digest(response)})
         if response.get('provenance') != source:
             raise ValueError('Saved response provenance missing or inconsistent; no reclassification allowed')
-        if response['http_status'] != 200:
-            raise RuntimeError('Provider failure saved; resolve explicitly before continuation')
-        body = json.loads(response['body'])
-        if body.get('model') != p['model']:
-            raise RuntimeError('Provider model identifier differs from frozen model; inspect before continuing')
-        try:
-            raw = body['choices'][0]['message']['content']
-            action = json.loads(raw)
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError):
-            action = None
-        outcome = canvas.apply(action)
-        # Invalid parsed values may include NaN/Infinity (including numeric
-        # overflow such as 1e309), extra fields, or arbitrary model text.
-        # The exact provider body is already durably preserved in response.json.
-        # Only accepted actions enter the JSON-safe event/history representation.
-        event = {'command': n + 1, 'action': action if outcome['valid'] else None,
-                 'response_file': res.name, 'outcome': outcome, 'model': body['model'],
-                 'usage': body.get('usage'), 'response_id': body.get('id')}
+        event = response_to_event(response, canvas, p['model'])
         save_once(directory / f'{n:02d}.event.json', event)
         history.append(event)
     render(canvas.paths, directory / 'final', p['image_size'], p['pen_width'])
-    summary = {'run_id': run['run_id'], 'target_id': run['target_id'], 'condition': run['condition'],
-               'commands': canvas.commands, 'invalid': canvas.invalid, 'stop_reason': 'stop' if canvas.stopped else 'budget',
-               'completion': None, 'data_kind': response['provenance']['data_kind'],
-               'artifacts_sha256': {f.name:file_sha256(f) for f in sorted(directory.iterdir()) if f.suffix in ('.svg','.png')}}
+    summary = summary_from_state(run, canvas, response['provenance'], directory)
     save_once(directory / 'summary.json', summary)
     return summary
