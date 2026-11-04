@@ -1,0 +1,14 @@
+{
+  "os": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+  "logical_cpus": 5,
+  "memory": {
+    "MemTotal": "18440100 kB",
+    "MemAvailable": "17266008 kB"
+  },
+  "cgroup_memory_max": "17179869184",
+  "cgroup_cpu_max": "400000 100000",
+  "gpu_device_nodes": [],
+  "disk_free_bytes": 27457212416,
+  "note": "No model throughput, multi-image capacity or environment lifetime is established by this snapshot."
+}

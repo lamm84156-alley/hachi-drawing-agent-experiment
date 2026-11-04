@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>Hachi human demonstration recorder</title>
+<style>body{font:16px system-ui;max-width:850px;margin:32px auto}canvas{border:1px solid #999;touch-action:none}button,input{margin:8px;padding:8px}</style>
+<h1>Human demonstration recorder</h1>
+<p>Use a separate target reference. Click a start point, then two controls and an endpoint per cubic segment. Add 1–4 segments per path. Commit paths in your intended drawing order. Export records your actual actions; do not label programmatic drawings as human records.</p>
+<label>Demonstrator ID <input id="person"></label><label>Target ID <input id="target"></label>
+<label>Canvas pixels <input id="size" type="number" value="256"></label><label>Pen pixels <input id="pen" type="number" value="2"></label>
+<button id="start">Start new recording</button><br><canvas id="c" width="256" height="256"></canvas><br>
+<button id="commit">Commit path</button><button id="clear">Clear uncommitted points</button><button id="export">Export human JSON</button><p id="status"></p>
+<script>
+const c=document.getElementById('c'),ctx=c.getContext('2d');let points=[],actions=[],times=[],started=null,width=2;
+function draw(a){ctx.beginPath();ctx.moveTo(a[0][0]*c.width,a[0][1]*c.height);for(let i=1;i+2<a.length;i+=3)ctx.bezierCurveTo(...a.slice(i,i+3).flat().map(v=>v*c.width));ctx.stroke()}
+function paint(){ctx.fillStyle='white';ctx.fillRect(0,0,c.width,c.height);ctx.lineWidth=width;ctx.strokeStyle='black';actions.forEach(a=>draw(a.points));if(points.length>=4)draw(points);ctx.fillStyle='red';points.forEach(p=>{ctx.beginPath();ctx.arc(p[0]*c.width,p[1]*c.height,2,0,7);ctx.fill()});document.getElementById('status').textContent=`${actions.length} committed paths; ${points.length} pending points`}
+document.getElementById('start').onclick=()=>{if(actions.length&&!confirm('Discard current recording?'))return;c.width=c.height=Number(document.getElementById('size').value);width=Number(document.getElementById('pen').value);started=new Date().toISOString();points=[];actions=[];times=[];paint()};
+c.onclick=e=>{if(!started)return alert('Start a recording first');if(points.length===13)return;const r=c.getBoundingClientRect();points.push([(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]);paint()};
+document.getElementById('clear').onclick=()=>{points=[];paint()};
+document.getElementById('commit').onclick=()=>{if(![4,7,10,13].includes(points.length))return alert('Use 4,7,10,13 points');actions.push({op:'draw',points});times.push(new Date().toISOString());points=[];paint()};
+document.getElementById('export').onclick=()=>{const person=document.getElementById('person').value,target=document.getElementById('target').value;if(!person||!target||actions.length<2||points.length)return alert('Provide IDs, at least 2 paths, and commit/clear pending points');const data={provenance:'human_recorded',demonstrator_id:person,target_id:target,started_at:started,committed_at:times,image_size:c.width,pen_width:width,actions};const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.download='human-demo.json';a.click();URL.revokeObjectURL(a.href)};paint();
+</script>

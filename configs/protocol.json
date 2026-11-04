@@ -1,0 +1,15 @@
+{
+  "renderer": "diffvg",
+  "command_budget": 40,
+  "guidance": "full_context",
+  "model": null,
+  "temperature": null,
+  "image_size": null,
+  "pen_width": null,
+  "history_limit": null,
+  "max_output_tokens": null,
+  "context_limit_tokens": null,
+  "rubric_version": null,
+  "seed_supported": false,
+  "prompt": "Reproduce the target cartoon face using a black fixed-width pen. Left and right refer to the viewer. Choose exactly one action per turn as JSON: {\"op\":\"draw\",\"points\":[[x,y],...]}, {\"op\":\"undo\"}, or {\"op\":\"stop\"}. Coordinates are normalized to [0,1]. A draw is one connected path of 1 to 4 cubic Bezier segments: the initial point followed by three points per segment (4,7,10,13 points total). Every command, including an invalid action, consumes the 40-command budget. Stop when complete. Demonstrations, when present, show before canvas, action, and after canvas."
+}

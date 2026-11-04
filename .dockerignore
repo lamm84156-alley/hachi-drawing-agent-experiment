@@ -1,0 +1,9 @@
+.git
+runs
+materials
+private
+artifacts
+.env
+__pycache__
+.pytest_cache
+*.egg-info
